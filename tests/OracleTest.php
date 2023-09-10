@@ -79,3 +79,21 @@ it('throws an exception with strict mode enabled', function () {
 
     expect($query)->toBe('There are 0 users in the database.');
 });
+
+it('can use prepareQueryUsing to modify the question', function () {
+    // Set the callback to append a string
+    Oracle::prepareQueryUsing(fn (string $question) => $question . ' modified');
+
+    $queryPrompt = version_compare(app()->version(), '10', '>=') ? 'query-prompt-l10.txt' : 'query-prompt.txt';
+
+    // Expect that the prompt sent to OpenAI includes the modified question
+    $client = mockClient('POST', 'completions', [[
+        'model' => 'text-davinci-003',
+        'prompt' => rtrim(file_get_contents(__DIR__.'/Fixtures/'.$queryPrompt), PHP_EOL) . ' modified',
+    ]], [completion('SELECT * FROM users;"')]);
+
+    $oracle = new Oracle($client);
+    $query = $oracle->getQuery('How many users do you have?');
+
+    expect($query)->toBe('SELECT * FROM users;');
+});

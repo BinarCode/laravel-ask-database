@@ -11,6 +11,8 @@ class Oracle
 {
     protected string $connection;
 
+    public static $prepareQuestionCallback;
+
     public function __construct(protected Client $client)
     {
         $this->connection = config('ask-database.connection');
@@ -33,6 +35,10 @@ class Oracle
 
     public function getQuery(string $question): string
     {
+        if (is_callable(static::$prepareQuestionCallback)) {
+            $question = call_user_func(static::$prepareQuestionCallback, $question);
+        }
+
         $prompt = $this->buildPrompt($question);
 
         $query = $this->queryOpenAi($prompt, "\n");
@@ -85,7 +91,8 @@ class Oracle
             return (string) DB::raw($query);
         }
 
-        return DB::raw($query)->getValue(DB::connection($this->connection)->getQueryGrammar());
+        return DB::raw($query)
+            ->getValue(DB::connection($this->connection)->getQueryGrammar());
     }
 
     /**
@@ -135,14 +142,21 @@ class Oracle
         ]);
         $prompt = rtrim($prompt, PHP_EOL);
 
-        $matchingTablesResult = $this->queryOpenAi($prompt, "\n");
+        $matchingTables = $this->queryOpenAi($prompt, "\n");
 
-        $matchingTables = Str::of($matchingTablesResult)
+        Str::of($matchingTables)
             ->explode(',')
-            ->transform(fn (string $tableName) => strtolower(trim($tableName)));
+            ->transform(fn (string $tableName) => trim($tableName))
+            ->filter()
+            ->each(function (string $tableName) use (&$tables) {
+                $tables = array_filter($tables, fn ($table) => strtolower($table->getName()) === strtolower($tableName));
+            });
 
-        return collect($tables)->filter(function ($table) use ($matchingTables) {
-            return $matchingTables->contains(strtolower($table->getName()));
-        })->toArray();
+        return $tables;
+    }
+
+    public static function prepareQueryUsing(callable $callback)
+    {
+        static::$prepareQuestionCallback = $callback;
     }
 }
